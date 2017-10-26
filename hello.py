@@ -3,7 +3,6 @@
 import re
 from urllib import request
 from urllib import parse
-# from bson import json_util  
 import json
 import time
 import pymongo  
@@ -11,6 +10,29 @@ import requests
 from bs4 import BeautifulSoup
 from requests import RequestException
 import datetime
+import logging
+
+# for the log module
+# set up logging to file - see previous section for more details
+logging.basicConfig(level=logging.DEBUG,
+                    format='[%(asctime)s] -%(levelname)-8s %(message)s',
+                    filename='Toutiao.log',
+                    datefmt='%m-%d %H:%M',
+                    filemode='w')
+# define a Handler which writes INFO messages or higher to the sys.stderr
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+# set a format which is simpler for console use
+formatter = logging.Formatter('[%(asctime)s]%(name)-10s:-%(levelname)-8s %(message)s',datefmt='%m-%d %H:%M')
+# tell the handler to use this format
+console.setFormatter(formatter)
+# add the handler to the root logger
+logging.getLogger('').addHandler(console)
+logger_Article = logging.getLogger('Article')
+logger_Comment  = logging.getLogger('Comment')
+logger_Reply  = logging.getLogger('Reply')
+logger_User  = logging.getLogger('User')
+logger_Article_list  = logging.getLogger('Article List')
 
 def save_to_mongo(data, coll, **mongo_conn_kw):  
     # Get a reference to a particular database  
@@ -48,7 +70,8 @@ def save_user(id):
             }
             save_to_mongo(user_data, Users)
     except Exception as e:
-        print ("the save_user exception is ",e)
+        logger_User.error("the save_user exception is %s"%(e))
+        raise
 
 def time_parser(timestamp):
     #转换成localtime
@@ -59,7 +82,7 @@ def time_parser(timestamp):
 def save_reply(count, id):
     offset = 0
     count = int(count)
-    print("the replies count is ",count)
+    logger_Reply.info("the replies count is %s"%(count))
     while(1):
         query_data = {
             'comment_id': id,
@@ -87,10 +110,10 @@ def save_reply(count, id):
                         save_user(str(item['comment']['user_id']))
                         save_to_mongo(reply_data, Replies)
         except Exception as e:
-            print ('the save_reply exception is ',e)
+            logger_Reply.error('the save_reply exception is %s'%(e))
         offset+=20     
         if (offset-20>count):
-            print('reply is done--------------->')
+            logger_Reply.info('reply is done--------------->')
             return   
 
 def Checktime(starttime,endtime,weibotime):
@@ -112,7 +135,7 @@ def get_page_detail(url):
             return response.text
         return None
     except RequestException:
-        print("请求详情页出错", url)
+        logger_Article.error("请求详情页出错 url = %s" % (url))
         return None
 
 def parse_page_detail(html):
@@ -132,10 +155,6 @@ def parse_page_detail(html):
     except:
         return "" 
 
-id_finish_article = [
-    '6452025951462818061'
-]
-
 if __name__ == '__main__': 
     error_list = []
     base_url ="http://www.toutiao.com" 
@@ -145,8 +164,8 @@ if __name__ == '__main__':
     # localhost:27017 by default  
     client = pymongo.MongoClient(connect=False) 
     # Get a reference to a particular database  
-    db = client['Toutiao'] 
-    # db = client['Repeat_test'] 
+    # db = client['Toutiao'] 
+    db = client['Repeat_test'] 
     Articles = db['Articles']
     Comments = db['Comments']
     Users = db['Users']
@@ -155,9 +174,7 @@ if __name__ == '__main__':
     Comments.ensure_index('id', unique=True)
     Users.ensure_index('id', unique=True)
     Replies.ensure_index('id', unique=True)
-    # Comments = mongo_init('Comments')
-    # Articles = mongo_init('Articles')
-    # Replies = mongo_init('Replies')
+
     while(i < 3):
         while(1):
             keywords = ['洞朗','中印对峙', '中印边境']
@@ -176,24 +193,24 @@ if __name__ == '__main__':
                     data_json = json.loads(data_read.decode('utf-8'))
                     data = data_json['data']
                     return_count = int(data_json['return_count'])
-                    print("this search url is handling "+url)
+                    logger_Article_list.info("this search url is handling %s"%(url))
                     if(return_count ==0):
-                        print("this keyword is done++++++++++++++++！！！！！！！！！！！！！！！！！！！！")                    
+                        logger_Article_list.info("this keyword is done++++++++++++++++！！！！！！！！！！！！！！！！！！！！")                    
                         break;    
-                    print('return_count:',return_count)
+                    logger_Article.info('return_count:%s'%(return_count))
                     for num in range(0,return_count): 
-                        print('Article: '+str(num))
+                        logger_Article.info('Article: %s'% (str(num)))
                         data_item = data[num]
                         flag = True
                         # print (data_item)
                         if 'datetime' in data_item and 'id' in data_item:
-                            print("the date time is ",data_item['datetime'],' and the id is ',data_item['id'])
+                            logger_Article.info("the date time is %s  and the id is %s"%(data_item['datetime'],data_item['id']))
                             for id in  Articles.find({"id":data_item['id']}): 
-                                print("Already got it ", id['id'],id['title'])
+                                logger_Article.warning("Already got it %s %s"%( id['id'],id['title']))
                                 flag = False
-                                print("we find commens is 【%s】 but the collection has 【%s】"%(data_item['comments_count'],Comments.find({'article_id':data_item['id']}).count()))
-                            if data_item['comments_count'] != Comments.find({'article_id':data_item['id']}).count():
-                                print("But we still gonna to crawl it for unfinished comments :-)")
+                                logger_Article.info("we find commens is 【%s】 but the collection has 【%s】"%(data_item['comments_count'],Comments.find({'article_id':data_item['id']}).count()))
+                            if data_item['comments_count'] > Comments.find({'article_id':data_item['id']}).count():
+                                logger_Article.warning("But we still gonna to crawl it for unfinished comments :-)")
                                 flag = True
                             if Checktime('2017-06-18 0:0:0','2017-08-29 0:0:0',data_item['datetime']+':00') and flag:
                                     # id_finish_article.append(data_item['id'])
@@ -204,15 +221,13 @@ if __name__ == '__main__':
                                         media_url = data_item['media_url'] #发布者名字
                                     title = data_item['title']
                                     id = data_item['id']
-                                    print("Now clawling article is ",title)
+                                    logger_Article.info("Now clawling article is %s"%(title))
                                     article_url = data_item['article_url']#文章url
                                     datetime = data_item['datetime']
                                     comments_count = int(data_item['comments_count'])
                                     download_url = 'http://www.toutiao.com/a'+str(id) +'/'
-                                    # print("???????????++++++++++++")
                                     html = get_page_detail(download_url)
                                     content = parse_page_detail(html)
-                                    # F('content ----',content)
                                     new_data = {
                                         'media_name':media_name,
                                         'title':title,
@@ -243,7 +258,7 @@ if __name__ == '__main__':
                                             data_comment = data_json_comment['data']
                                             for item in data_comment:
                                                 comment_id = item['comment']['id']
-                                                print ("the comment ID is  s",comment_id)
+                                                logger_Comment.info("the comment ID is  %s"%(comment_id))
                                                 comment_data = {
                                                     'article_id':id,
                                                     'id':comment_id,
@@ -263,9 +278,9 @@ if __name__ == '__main__':
                                         offset_comment += count;
                 offset+=20
             except Exception as e:
-                print( "the main while's exception is  ",e)
+                logger_Article_list.error( "the main while has an exception is %s"%e)
         i+=1
         offset = 0
-        print('one keyword is done :)')
-    print('everything is done :)')
+        logger_Article_list.info('one keyword is done :)')
+    logger_Article_list.info('everything is done :)')
     client.close()
