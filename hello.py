@@ -71,8 +71,8 @@ def save_user(id):
             save_to_mongo(user_data, Users)
     except Exception as e:
         logger_User.error("the save_user exception is %s"%(e))
-        raise
-
+        return
+        
 def time_parser(timestamp):
     #转换成localtime
     time_local = time.localtime(timestamp)
@@ -155,6 +155,7 @@ def parse_page_detail(html):
     except:
         return "" 
 
+err_com = ['1572854655127566']
 if __name__ == '__main__': 
     error_list = []
     base_url ="http://www.toutiao.com" 
@@ -164,8 +165,8 @@ if __name__ == '__main__':
     # localhost:27017 by default  
     client = pymongo.MongoClient(connect=False) 
     # Get a reference to a particular database  
-    # db = client['Toutiao'] 
-    db = client['Repeat_test'] 
+    db = client['Toutiao'] 
+    # db = client['Repeat_test'] 
     Articles = db['Articles']
     Comments = db['Comments']
     Users = db['Users']
@@ -174,10 +175,12 @@ if __name__ == '__main__':
     Comments.ensure_index('id', unique=True)
     Users.ensure_index('id', unique=True)
     Replies.ensure_index('id', unique=True)
-
-    while(i < 3):
+    # keywords = ['中印','洞朗','中印对峙', '中印边境']
+    keywords = ['中印对峙', '中印边境']
+    while(i < len(keywords)):
         while(1):
-            keywords = ['洞朗','中印对峙', '中印边境']
+            # keywords = ['中印','洞朗','中印对峙', '中印边境']
+            keywords = ['中印对峙', '中印边境']
             query_data = {
                 'offset': offset,
                 'format': 'json',
@@ -205,13 +208,20 @@ if __name__ == '__main__':
                         # print (data_item)
                         if 'datetime' in data_item and 'id' in data_item:
                             logger_Article.info("the date time is %s  and the id is %s"%(data_item['datetime'],data_item['id']))
+                            have_comments = Comments.find({'article_id':data_item['id']}).count()
                             for id in  Articles.find({"id":data_item['id']}): 
                                 logger_Article.warning("Already got it %s %s"%( id['id'],id['title']))
                                 flag = False
-                                logger_Article.info("we find commens is 【%s】 but the collection has 【%s】"%(data_item['comments_count'],Comments.find({'article_id':data_item['id']}).count()))
-                            if data_item['comments_count'] > Comments.find({'article_id':data_item['id']}).count():
-                                logger_Article.warning("But we still gonna to crawl it for unfinished comments :-)")
-                                flag = True
+                                logger_Article.info("we find commens is 【%s】 but the collection has 【%s】"%(data_item['comments_count'],have_comments))
+                            # if data_item['comments_count'] > have_comments:
+                            #     # 没爬到的大于总评论的千分之一？
+                            #     if (data_item['comments_count'] - have_comments)/data_item['comments_count'] > 0.1:
+                            #         # 没爬到的帖数大于3？
+                            #         if data_item['comments_count'] - have_comments > 3:
+                            #             if have_comments < 1000 :
+                            #             # 重新爬
+                            #                 logger_Article.warning("But we still gonna to crawl it for unfinished comments :-)")
+                            #                 flag = True
                             if Checktime('2017-06-18 0:0:0','2017-08-29 0:0:0',data_item['datetime']+':00') and flag:
                                     # id_finish_article.append(data_item['id'])
                                     media_name = "参考消息"
@@ -244,7 +254,7 @@ if __name__ == '__main__':
                                     save_to_mongo(new_data, Articles)
                                     if 'media_creator_id' in data_item:
                                         save_user(str(data_item['media_creator_id']))
-                                    offset_comment = 0
+                                    offset_comment = have_comments-20 if have_comments>20 else 0
                                     count = 20
                                     while(offset_comment < comments_count):#每次+20
                                         query_data_comment = {
@@ -256,6 +266,9 @@ if __name__ == '__main__':
                                             data_read_comment = f_comment.read()
                                             data_json_comment = json.loads(data_read_comment.decode('utf-8'))
                                             data_comment = data_json_comment['data']
+                                            if data_json_comment['total_number']==0:
+                                                logger_Comment.info('the comment is done ')
+                                                break
                                             for item in data_comment:
                                                 comment_id = item['comment']['id']
                                                 logger_Comment.info("the comment ID is  %s"%(comment_id))
